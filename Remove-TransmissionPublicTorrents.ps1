@@ -99,6 +99,3 @@ $remainingCount = $allTorrents.Count - $deletedCount
 Write-Host "Total torrents checked: $($allTorrents.Count)"
 Write-Host "Torrents deleted: $deletedCount"
 Write-Host "Torrents remaining: $remainingCount"
-
-# You can add additional actions here (e.g., logging, notifications)
-# Be cautious and test thoroughly!
