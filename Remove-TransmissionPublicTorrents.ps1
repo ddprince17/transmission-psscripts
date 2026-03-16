@@ -7,7 +7,9 @@ param (
 
     [Parameter(Mandatory = $true)]
     [ValidateSet("http", "https")]
-    [string]$TransmissionScheme = "http"
+    [string]$TransmissionScheme = "http",
+
+    [switch]$RemovePrivateOlderThan30Days
 )
 
 Write-Host "Transmission server details:"
@@ -44,7 +46,7 @@ function Get-TransmissionTorrents {
     $requestBody = @{
         method    = "torrent-get"
         arguments = @{
-            fields = @("id", "name", "percentDone", "isPrivate")
+            fields = @("id", "name", "percentDone", "isPrivate", "addedDate")
         }
     } | ConvertTo-Json
 
@@ -59,6 +61,7 @@ function Get-TransmissionTorrents {
 
 # Get all torrents
 $allTorrents = Get-TransmissionTorrents
+$privateDeletionCutoff = (Get-Date).AddDays(-30)
 
 # Initialize counters
 $deletedCount = 0
@@ -70,7 +73,38 @@ foreach ($torrent in $allTorrents) {
         Write-Host "Torrent $($torrent.name) (ID $($torrent.id)) is not completed yet, thus ignored."
     }
     elseif ($torrent.isPrivate) {
-        Write-Host "Torrent $($torrent.name) (ID $($torrent.id)) is private."
+        $addedDate = $null
+
+        if ($torrent.addedDate -gt 0) {
+            $addedDate = [DateTimeOffset]::FromUnixTimeSeconds($torrent.addedDate).LocalDateTime
+        }
+
+        if ($RemovePrivateOlderThan30Days -and $addedDate -and $addedDate -lt $privateDeletionCutoff) {
+            Write-Host "Torrent $($torrent.name) (ID $($torrent.id)) is private and older than 30 days. Deleting..."
+
+            $requestBody = @{
+                method    = "torrent-remove"
+                arguments = @{
+                    ids                 = @($torrent.id)
+                    "delete-local-data" = $true
+                }
+            } | ConvertTo-Json
+
+            Invoke-RestMethod -Uri ("${TransmissionScheme}://${TransmissionHost}:${TransmissionPort}/transmission/rpc") -Method Post -Headers @{
+                Authorization               = $BasicAuth
+                "X-Transmission-Session-Id" = $sessionId
+            } -ContentType "application/json" -Body $requestBody
+
+            $deletedCount++
+        }
+        else {
+            if ($RemovePrivateOlderThan30Days -and $addedDate) {
+                Write-Host "Torrent $($torrent.name) (ID $($torrent.id)) is private and was added on $($addedDate.ToString("yyyy-MM-dd")). Keeping it."
+            }
+            else {
+                Write-Host "Torrent $($torrent.name) (ID $($torrent.id)) is private."
+            }
+        }
     }
     else {
         Write-Host "Torrent $($torrent.name) (ID $($torrent.id)) is public. Deleting..."
